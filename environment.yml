@@ -24,4 +24,5 @@ dependencies:
     - submitit
     - rerun-sdk
     - numpy==1.23
+    - -e git+https://github.com/facebookresearch/segment-anything.git#egg=segment-anything
 

@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 import numpy as np
 import cv2
 from tqdm import tqdm
@@ -15,11 +16,21 @@ import main_mcc
 import mcc_model
 import util.misc as misc
 import rerun as rr
+from typing import Final
+from rerun.components.rect2d import RectFormat
+from segment_anything import SamPredictor, sam_model_registry
+from segment_anything.modeling import Sam
 import requests
 from pathlib import Path
 from engine_mcc import prepare_data
 
-MODEL_URL: str = "https://dl.fbaipublicfiles.com/MCC/co3dv2_all_categories.pth"
+MODEL_DIR: Final = Path(os.path.dirname(__file__)) / "checkpoint"
+MODEL_URLS: Final = {
+    "vit_h": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
+    "vit_l": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+    "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+    "mcc": "https://dl.fbaipublicfiles.com/MCC/co3dv2_all_categories.pth"
+}
 
 def download_with_progress(url: str, dest: Path) -> None:
     """Download file with tqdm progress bar."""
@@ -33,6 +44,24 @@ def download_with_progress(url: str, dest: Path) -> None:
             for data in resp.iter_content(chunk_size):
                 dest_file.write(data)
                 progress.update(len(data))
+
+def get_downloaded_model_path(model_name: str) -> Path:
+    """Fetch the segment-anything model to a local cache directory."""
+    model_url = MODEL_URLS[model_name]
+
+    model_location = MODEL_DIR / model_url.split("/")[-1]
+    if not model_location.exists():
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        download_with_progress(model_url, model_location)
+
+    return model_location
+
+def create_sam(model: str, device: str) -> Sam:
+    """Load the segment-anything model, fetching the model-file as necessary."""
+    model_path = get_downloaded_model_path(model)
+
+    sam = sam_model_registry[model](checkpoint=model_path)
+    return sam.to(device=device)
 
 def occupancy_to_points(occupancy, xyz, color, threshold=0.1):
 
@@ -127,11 +156,19 @@ def main(args):
 
     misc.load_model(args=args, model_without_ddp=model, optimizer=None, loss_scaler=None)
 
-    rgb = cv2.imread(args.image)
+    bgr = cv2.imread(args.image)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
     obj = load_obj(args.point_cloud)
 
     rr.set_time_sequence("num_passes", 0)
-    rr.log_image("input", rgb[..., ::-1])
+    rr.log_image("input", rgb)
+
+    rr.log_rect(
+        "input/bbox-for-seg",
+        args.bbox_for_seg,
+        rect_format=RectFormat.XYXY,
+        color=(255, 0, 0))
 
     seen_rgb = (torch.tensor(rgb).float() / 255)[..., [2, 1, 0]]
     H, W = seen_rgb.shape[:2]
@@ -143,7 +180,19 @@ def main(args):
     )[0].permute(1, 2, 0)
 
     seen_xyz = obj[0].reshape(H, W, 3)
-    seg = cv2.imread(args.seg, cv2.IMREAD_UNCHANGED)
+    # segmentation
+    sam = create_sam("vit_b", "cuda")
+    predictor = SamPredictor(sam)
+    predictor.set_image(rgb)
+
+    bbox = np.array(args.bbox_for_seg)
+    masks, _, _ = predictor.predict(
+        point_coords=None,
+        point_labels=None,
+        box=bbox[None, :],
+        multimask_output=False,
+    )
+    seg = masks[0].astype(np.uint8)
     mask = torch.tensor(cv2.resize(seg, (W, H))).bool()
     rr.log_tensor("mask", mask.float())
     seen_xyz[~mask] = float('inf')
@@ -191,6 +240,12 @@ if __name__ == '__main__':
     parser.add_argument('--image', default='demo/quest2.jpg', type=str, help='input image file')
     parser.add_argument('--point_cloud', default='demo/quest2.obj', type=str, help='input obj file')
     parser.add_argument('--seg', default='demo/quest2_seg.png', type=str, help='input obj file')
+    parser.add_argument(
+        '--bbox-for-seg',
+        default=[102,254,600,754],
+        type=int,
+        nargs='+',
+        help='coordinates for bounding box to segment object, has format of xyxy')
     parser.add_argument('--output', default='demo/output', type=str, help='output path')
     parser.add_argument('--granularity', default=0.05, type=float, help='output granularity')
     parser.add_argument('--score_thresholds', default=[0.1, 0.2, 0.3, 0.4, 0.5], type=float, nargs='+', help='score thresholds')
@@ -205,7 +260,7 @@ if __name__ == '__main__':
     checkpoint_path = Path("checkpoint") / "co3dv2_all_categories.pth"
     if not checkpoint_path.exists():
         checkpoint_path.parent.mkdir()
-        download_with_progress(MODEL_URL, checkpoint_path)
+        download_with_progress(MODEL_URLS["mcc"], checkpoint_path)
 
     args.resume = str(checkpoint_path)
     args.viz_granularity = args.granularity
