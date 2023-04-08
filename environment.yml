@@ -1,4 +1,4 @@
-name: mmc
+name: mcc
 channels:
   - pytorch
   - nvidia
