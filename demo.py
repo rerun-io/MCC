@@ -45,6 +45,7 @@ def download_with_progress(url: str, dest: Path) -> None:
                 dest_file.write(data)
                 progress.update(len(data))
 
+
 def get_downloaded_model_path(model_name: str) -> Path:
     """Fetch the segment-anything model to a local cache directory."""
     model_url = MODEL_URLS[model_name]
@@ -56,6 +57,7 @@ def get_downloaded_model_path(model_name: str) -> Path:
 
     return model_location
 
+
 def create_sam(model: str, device: str) -> Sam:
     """Load the segment-anything model, fetching the model-file as necessary."""
     model_path = get_downloaded_model_path(model)
@@ -63,8 +65,9 @@ def create_sam(model: str, device: str) -> Sam:
     sam = sam_model_registry[model](checkpoint=model_path)
     return sam.to(device=device)
 
-def occupancy_to_points(occupancy, xyz, color, threshold=0.1):
 
+def log_points(occupancy, xyz, color, threshold=0.1):
+    """Given occupancy, xyz, and color, log points using rerun. """
     occupancy = torch.nn.Sigmoid()(occupancy)
     pos = occupancy > threshold
     points = xyz[pos].reshape((-1, 3))
@@ -75,11 +78,12 @@ def occupancy_to_points(occupancy, xyz, color, threshold=0.1):
         return
     
     rr.log_points(
-        "world/points",
+        "Predicted Point Cloud",
         positions = points[good_points].cpu(),
         colors = features[good_points].cpu())
 
-def run_viz(model, samples, device, args, prefix):
+
+def run_viz(model, samples, device, args):
     model.eval()
 
     seen_xyz, valid_seen_xyz, unseen_xyz, unseen_rgb, labels, seen_images = prepare_data(
@@ -126,10 +130,11 @@ def run_viz(model, samples, device, args, prefix):
             vis_occupy = torch.cat(pred_occupy, dim=1)
             vis_colors = torch.cat(pred_colors, dim=0)
             vis_xyz = unseen_xyz[:, :p_end, :]
-            occupancy_to_points(
+            log_points(
                 vis_occupy,
                 vis_xyz,
                 vis_colors)
+
 
 def pad_image(im, value):
     if im.shape[0] > im.shape[1]:
@@ -146,6 +151,47 @@ def normalize(seen_xyz):
     return seen_xyz
 
 
+def get_intrinsics(H,W):
+    """
+    Intrinsics for a pinhole camera model.
+    Assume fov of 55 degrees and central principal point.
+    """
+    f = 0.5 * W / np.tan(0.5 * 55 * np.pi / 180.0)
+    cx = 0.5 * W
+    cy = 0.5 * H
+    return np.array([[f, 0, cx],
+                     [0, f, cy],
+                     [0, 0, 1]])
+
+
+def backproject_depth_to_pointcloud(depth, rotation=np.eye(3), translation=np.zeros(3)):
+    intrinsics = get_intrinsics(depth.shape[0], depth.shape[1])
+    # Get the depth map shape
+    height, width = depth.shape
+
+    # Create a matrix of pixel coordinates
+    u, v = np.meshgrid(np.arange(width), np.arange(height))
+    uv_homogeneous = np.stack((u, v, np.ones_like(u)), axis=-1).reshape(-1, 3)
+
+    # Invert the intrinsic matrix
+    inv_intrinsics = np.linalg.inv(intrinsics)
+
+    # Convert depth to the camera coordinate system
+    points_cam_homogeneous = np.dot(uv_homogeneous, inv_intrinsics.T) * depth.flatten()[:, np.newaxis]
+
+    # Convert to 3D homogeneous coordinates
+    points_cam_homogeneous = np.concatenate((points_cam_homogeneous, np.ones((len(points_cam_homogeneous), 1))), axis=1)
+
+    # Apply the rotation and translation to get the 3D point cloud in the world coordinate system
+    extrinsics = np.hstack((rotation, translation[:, np.newaxis]))
+    pointcloud = np.dot(points_cam_homogeneous, extrinsics.T)
+
+    # Reshape the point cloud back to the original depth map shape
+    pointcloud = pointcloud[:, :3].reshape(height, width, 3)
+
+    return pointcloud
+
+
 def main(args):
 
     model = mcc_model.get_mcc_model(
@@ -159,18 +205,11 @@ def main(args):
     bgr = cv2.imread(args.image)
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-    obj = load_obj(args.point_cloud)
-
     rr.set_time_sequence("num_passes", 0)
-    rr.log_image("input", rgb)
-
-    rr.log_rect(
-        "input/bbox-for-seg",
-        args.bbox_for_seg,
-        rect_format=RectFormat.XYXY,
-        color=(255, 0, 0))
-
-    seen_rgb = (torch.tensor(rgb).float() / 255)[..., [2, 1, 0]]
+    rr.log_image("input-image", rgb)
+    
+    # seen in this context means the points that are visible in the image
+    seen_rgb = (torch.tensor(bgr).float() / 255)[..., [2, 1, 0]]
     H, W = seen_rgb.shape[:2]
     seen_rgb = torch.nn.functional.interpolate(
         seen_rgb.permute(2, 0, 1)[None],
@@ -179,24 +218,52 @@ def main(args):
         align_corners=False,
     )[0].permute(1, 2, 0)
 
-    seen_xyz = obj[0].reshape(H, W, 3)
-    # segmentation
-    sam = create_sam("vit_b", "cuda")
-    predictor = SamPredictor(sam)
-    predictor.set_image(rgb)
 
-    bbox = np.array(args.bbox_for_seg)
-    masks, _, _ = predictor.predict(
-        point_coords=None,
-        point_labels=None,
-        box=bbox[None, :],
-        multimask_output=False,
-    )
-    seg = masks[0].astype(np.uint8)
+    if args.seg is None:
+        # Generate mask using Segment Anything Mask (SAM)
+        sam = create_sam("vit_b", "cuda")
+        predictor = SamPredictor(sam)
+        predictor.set_image(rgb)
+        
+        bbox = np.array(args.bbox_for_seg)
+
+        rr.log_rect(
+            "input-image/bbox-for-seg",
+            args.bbox_for_seg,
+            rect_format=RectFormat.XYXY,
+            color=(255, 0, 0))
+
+        masks, _, _ = predictor.predict(
+            point_coords=None,
+            point_labels=None,
+            box=bbox[None, :],
+            multimask_output=False,
+        )
+        seg = masks[0].astype(np.uint8)
+    else:
+        seg = cv2.imread(args.seg, cv2.IMREAD_UNCHANGED)
+
     mask = torch.tensor(cv2.resize(seg, (W, H))).bool()
     rr.log_tensor("mask", mask.float())
+
+    if args.point_cloud is None:
+        # Get depth map and convert to point cloud
+        depth_model = torch.hub.load('isl-org/ZoeDepth', "ZoeD_N", pretrained=True).to("cuda").eval()
+        depth = depth_model.infer(seen_rgb.permute(2, 0, 1)[None].cuda())
+        depth = depth[0].permute(1, 2, 0)
+        depth = depth.cpu().detach().numpy().squeeze()
+        rr.log_depth_image("depth", depth)
+        seen_xyz = backproject_depth_to_pointcloud(depth)
+        seen_xyz = torch.tensor(seen_xyz).float()
+    else:
+        obj = load_obj(args.point_cloud)
+        # Verts from OBJ file reshaped to image size
+        seen_xyz = obj[0].reshape(H, W, 3)
     seen_xyz[~mask] = float('inf')
-    rr.log_tensor("seen_xyz", seen_xyz)
+    rr.log_points(
+        "Input Point Cloud",
+        seen_xyz.reshape(-1, 3),
+        colors=seen_rgb.reshape(-1, 3))
 
     seen_xyz = normalize(seen_xyz)
 
@@ -232,21 +299,20 @@ def main(args):
         [seen_xyz, seen_rgb],
         [torch.zeros((20000, 3)), torch.zeros((20000, 3))],
     ]
-    run_viz(model, samples, "cuda", args, prefix=args.output)
+    run_viz(model, samples, "cuda", args)
 
 
 if __name__ == '__main__':
     parser = main_mcc.get_args_parser()
-    parser.add_argument('--image', default='demo/quest2.jpg', type=str, help='input image file')
-    parser.add_argument('--point_cloud', default='demo/quest2.obj', type=str, help='input obj file')
-    parser.add_argument('--seg', default='demo/quest2_seg.png', type=str, help='input obj file')
+    parser.add_argument('--image', default='demo/spyro.jpg', type=str, help='input image file')
+    parser.add_argument('--point_cloud', type=str, help='input obj file')
+    parser.add_argument('--seg', type=str, help='input obj file')
     parser.add_argument(
         '--bbox-for-seg',
-        default=[102,254,600,754],
+        default=[27,44,412,595],
         type=int,
         nargs='+',
         help='coordinates for bounding box to segment object, has format of xyxy')
-    parser.add_argument('--output', default='demo/output', type=str, help='output path')
     parser.add_argument('--granularity', default=0.05, type=float, help='output granularity')
     parser.add_argument('--score_thresholds', default=[0.1, 0.2, 0.3, 0.4, 0.5], type=float, nargs='+', help='score thresholds')
     parser.add_argument('--temperature', default=0.1, type=float, help='temperature for color prediction.')
