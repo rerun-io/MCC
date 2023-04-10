@@ -31,9 +31,18 @@ conda env create -f environment.yml
 ```
 
 ## Quick Rerun visualziation
+<p align="center">
+  <video width="640" height="480" controls>
+    <source src="assets/rerun-example.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+</p>
+
+This fork uses rerun to help you more easily visualize the method. For a quick demo run
 ```
 python demo.py
 ```
+
 
 ## Data
 Please see [DATASET.md](DATASET.md) for information on data preparation.
