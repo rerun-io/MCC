@@ -192,6 +192,34 @@ def backproject_depth_to_pointcloud(depth, rotation=np.eye(3), translation=np.ze
     return pointcloud
 
 
+def point_cloud_to_depth_map(point_cloud, img_shape):
+    """
+    Project a point cloud into a depth map.
+
+    point_cloud: numpy array of shape (N, 3) with 3D coordinates in the camera frame
+    K: intrinsic camera matrix
+    img_shape: tuple with the shape of the depth map (height, width)
+    """
+    K = get_intrinsics(img_shape[0], img_shape[1])
+    # Project 3D points to 2D image coordinates
+    points_2d = K @ point_cloud.T
+    points_2d /= points_2d[2, :]
+    points_2d = points_2d[:2, :].T
+
+    # Round the 2D points to integers
+    points_2d = np.round(points_2d).astype(int)
+
+    # Filter out points outside the image dimensions
+    valid_points = (0 <= points_2d[:, 0]) & (points_2d[:, 0] < img_shape[1]) & \
+          (0 <= points_2d[:, 1]) & (points_2d[:, 1] < img_shape[0])
+    points_2d = points_2d[valid_points]
+    point_cloud = point_cloud[valid_points]
+
+    # Create a depth map and fill in the depths at the corresponding 2D points
+    depth_map = np.zeros(img_shape, dtype=np.float32)
+    depth_map[points_2d[:, 1], points_2d[:, 0]] = point_cloud[:, 2]
+
+    return depth_map
 def main(args):
 
     model = mcc_model.get_mcc_model(
@@ -259,6 +287,8 @@ def main(args):
         obj = load_obj(args.point_cloud)
         # Verts from OBJ file reshaped to image size
         seen_xyz = obj[0].reshape(H, W, 3)
+        depth = point_cloud_to_depth_map(obj[0].numpy(), (H, W))
+        rr.log_depth_image("depth", depth)
     seen_xyz[~mask] = float('inf')
     rr.log_points(
         "Input Point Cloud",
