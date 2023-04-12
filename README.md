@@ -31,12 +31,8 @@ conda env create -f environment.yml
 ```
 
 ## Quick Rerun visualziation
-<p align="center">
-  <video width="640" height="480" controls>
-    <source src="assets/rerun-example.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
-</p>
+<video controls autoplay src="https://user-images.githubusercontent.com/25287427/231321885-037dd753-2754-4e32-889b-5440216b7ace.mp4
+" controls="controls" style="max-width: 730px;"></video>
 
 This fork uses rerun to help you more easily visualize the method. For a quick demo run
 ```
