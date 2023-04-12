@@ -12,7 +12,8 @@
 
 
 
-This is a PyTorch implementation of [Multiview Compressive Coding (MCC)](https://arxiv.org/abs/2301.08247):
+This is a PyTorch implementation of [Multiview Compressive Coding (MCC)](https://arxiv.org/abs/2301.08247), 
+which has been modified to use [Rerun](https://github.com/rerun-io/rerun) for visualization.
 ```
 @article{wu2023multiview,
   author    = {Wu, Chao-Yuan and Johnson, Justin and Malik, Jitendra and Feichtenhofer, Christoph and Gkioxari, Georgia},
