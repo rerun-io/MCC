@@ -4,6 +4,9 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+# This work has been modified by Rerun. Additions that belong to Rerun are
+# also released under the same license as the original work.
+
 import os
 import numpy as np
 import cv2
