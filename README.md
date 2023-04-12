@@ -23,12 +23,22 @@ This is a PyTorch implementation of [Multiview Compressive Coding (MCC)](https:/
 ```
 
 ## Installation
-This repo is a modified from [the MAE repo](https://github.com/facebookresearch/mae). Installation and preparation follow that repo.
-Please also install [PyTorch3D](https://pytorch3d.org/) for 3D related funcionality.
+
+Assuming [conda](https://docs.conda.io/en/latest/miniconda.html) is installed on your system. Dependancies can be installed with
 
 ```
-pip install h5py omegaconf submitit
+conda env create -f environment.yml
 ```
+
+## Quick Rerun visualziation
+<video controls autoplay src="https://user-images.githubusercontent.com/25287427/231321885-037dd753-2754-4e32-889b-5440216b7ace.mp4
+" controls="controls" style="max-width: 730px;"></video>
+
+This fork uses rerun to help you more easily visualize the method. For a quick demo run
+```
+python demo.py
+```
+
 
 ## Data
 Please see [DATASET.md](DATASET.md) for information on data preparation.

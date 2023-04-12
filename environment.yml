@@ -1,0 +1,28 @@
+name: mcc
+channels:
+  - pytorch
+  - nvidia
+  - fvcore
+  - iopath
+  - conda-forge
+  - pytorch3d
+dependencies:
+  - python=3.8
+  - pytorch==1.13.1
+  - torchvision==0.14.1
+  - pytorch-cuda=11.7
+  - fvcore
+  - iopath
+  - pytorch3d
+  - pip:
+    - timm
+    - opencv-python
+    - matplotlib
+    - plotly
+    - h5py
+    - omegaconf
+    - submitit
+    - rerun-sdk
+    - numpy==1.23
+    - -e git+https://github.com/facebookresearch/segment-anything.git#egg=segment-anything
+
