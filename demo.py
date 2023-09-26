@@ -20,7 +20,6 @@ import mcc_model
 import util.misc as misc
 import rerun as rr
 from typing import Final
-from rerun.components.rect2d import RectFormat
 from segment_anything import SamPredictor, sam_model_registry
 from segment_anything.modeling import Sam
 import requests
@@ -79,11 +78,14 @@ def log_points(occupancy, xyz, color, threshold=0.1):
 
     if good_points.sum() == 0:
         return
-    
-    rr.log_points(
-        "Predicted Point Cloud",
-        positions = points[good_points].cpu(),
-        colors = features[good_points].cpu())
+
+    rr.log(
+        "predicted_points",
+        rr.Points3D(
+            positions=points[good_points].cpu(),
+            colors=features[good_points].numpy(force=True)
+        )
+    )
 
 
 def run_viz(model, samples, device, args):
@@ -223,6 +225,8 @@ def point_cloud_to_depth_map(point_cloud, img_shape):
     depth_map[points_2d[:, 1], points_2d[:, 0]] = point_cloud[:, 2]
 
     return depth_map
+
+
 def main(args):
 
     model = mcc_model.get_mcc_model(
@@ -237,7 +241,7 @@ def main(args):
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
     rr.set_time_sequence("num_passes", 0)
-    rr.log_image("input-image", rgb)
+    rr.log("input-image", rr.Image(rgb))
     
     # seen in this context means the points that are visible in the image
     seen_rgb = (torch.tensor(bgr).float() / 255)[..., [2, 1, 0]]
@@ -258,11 +262,14 @@ def main(args):
         
         bbox = np.array(args.bbox_for_seg)
 
-        rr.log_rect(
+        rr.log(
             "input-image/bbox-for-seg",
-            args.bbox_for_seg,
-            rect_format=RectFormat.XYXY,
-            color=(255, 0, 0))
+            rr.Boxes2D(
+                mins=bbox[:2],
+                sizes=bbox[2:] - bbox[:2],
+                colors=(255, 0, 0),
+            )
+        )
 
         masks, _, _ = predictor.predict(
             point_coords=None,
@@ -275,7 +282,7 @@ def main(args):
         seg = cv2.imread(args.seg, cv2.IMREAD_UNCHANGED)
 
     mask = torch.tensor(cv2.resize(seg, (W, H))).bool()
-    rr.log_tensor("mask", mask.float())
+    rr.log("mask", rr.Tensor(mask.float()))
 
     if args.point_cloud is None:
         # Get depth map and convert to point cloud
@@ -283,7 +290,7 @@ def main(args):
         depth = depth_model.infer(seen_rgb.permute(2, 0, 1)[None].cuda())
         depth = depth[0].permute(1, 2, 0)
         depth = depth.cpu().detach().numpy().squeeze()
-        rr.log_depth_image("depth", depth)
+        rr.log("depth", rr.DepthImage(depth))
         seen_xyz = backproject_depth_to_pointcloud(depth)
         seen_xyz = torch.tensor(seen_xyz).float()
     else:
@@ -291,12 +298,13 @@ def main(args):
         # Verts from OBJ file reshaped to image size
         seen_xyz = obj[0].reshape(H, W, 3)
         depth = point_cloud_to_depth_map(obj[0].numpy(), (H, W))
-        rr.log_depth_image("depth", depth)
+        rr.log("depth", rr.DepthImage(depth))
     seen_xyz[~mask] = float('inf')
-    rr.log_points(
-        "Input Point Cloud",
-        seen_xyz.reshape(-1, 3),
-        colors=seen_rgb.reshape(-1, 3))
+
+    rr.log(
+        "input_points",
+        rr.Points3D(positions=seen_xyz[mask], colors=seen_rgb[mask].numpy())
+    )
 
     seen_xyz = normalize(seen_xyz)
 
