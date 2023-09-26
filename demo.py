@@ -228,6 +228,10 @@ def point_cloud_to_depth_map(point_cloud, img_shape):
 
 
 def main(args):
+    # NOTE projection is done with RDF camera without extrinsics, hence Y will be down
+    #  for upright images
+    rr.log("input_points", rr.ViewCoordinates.RIGHT_HAND_Y_DOWN, timeless=True)
+    rr.log("predicted_points", rr.ViewCoordinates.RIGHT_HAND_Y_DOWN, timeless=True)
 
     model = mcc_model.get_mcc_model(
         occupancy_weight=1.0,
