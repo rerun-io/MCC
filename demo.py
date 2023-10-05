@@ -83,7 +83,7 @@ def log_points(occupancy, xyz, color, threshold=0.1):
         "predicted_points",
         rr.Points3D(
             positions=points[good_points].cpu(),
-            colors=features[good_points].numpy(force=True)
+            colors=features[good_points].cpu()
         )
     )
 
@@ -269,8 +269,8 @@ def main(args):
         rr.log(
             "input-image/bbox-for-seg",
             rr.Boxes2D(
-                mins=bbox[:2],
-                sizes=bbox[2:] - bbox[:2],
+                array=bbox,
+                array_format=rr.Box2DFormat.XYXY,
                 colors=(255, 0, 0),
             )
         )
@@ -307,7 +307,7 @@ def main(args):
 
     rr.log(
         "input_points",
-        rr.Points3D(positions=seen_xyz[mask], colors=seen_rgb[mask].numpy())
+        rr.Points3D(positions=seen_xyz[mask], colors=seen_rgb[mask])
     )
 
     seen_xyz = normalize(seen_xyz)
