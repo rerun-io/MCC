@@ -25,10 +25,20 @@ which has been modified to use [Rerun](https://github.com/rerun-io/rerun) for vi
 
 ## Installation
 
+### Conda
 Assuming [conda](https://docs.conda.io/en/latest/miniconda.html) is installed on your system. Dependancies can be installed with
 
 ```
 conda env create -f environment.yml
+```
+
+### virtualenv + pip
+Make sure `nvcc` is available (11.7 assumed and tested here, feel free to try other versions). Create a virtualenv and install dependencies.
+```
+python3 -m venv env
+source env/bin/activate
+pip install torch==1.13.1 torchvision==0.14.1 # need to manually beforehand, because pytorch3d doesn't specify install dependencies properly
+pip install -r requirements.txt
 ```
 
 ## Quick Rerun visualziation
